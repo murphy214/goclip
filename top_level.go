@@ -4,6 +4,7 @@ import (
 	"github.com/paulmach/go.geojson"
 	m "github.com/murphy214/mercantile"
 	"math"
+	"strings"
 )
 
 
@@ -163,8 +164,9 @@ func Feature_Clip_Tile(feat *geojson.Feature,tileid m.TileID) map[m.TileID][]*ge
 // given a feature return tilemap of the clipped feature
 // works for simple geometries
 func Clip_Naive(feature *geojson.Feature,size int) map[m.TileID][]*geojson.Feature {
-	// clipping for a single point
-	if feature.Geometry.Type == "Point" {
+	if strings.Contains(string(feature.Geometry.Type),"Multi") {
+		return Clip_Multi_Naive(feature,size)
+	} else if feature.Geometry.Type == "Point" {
 		tileid := m.Tile(feature.Geometry.Point[0],feature.Geometry.Point[1],size)
 		return map[m.TileID][]*geojson.Feature{tileid:[]*geojson.Feature{feature}}
 	} else if feature.Geometry.Type == "LineString" {
@@ -174,6 +176,78 @@ func Clip_Naive(feature *geojson.Feature,size int) map[m.TileID][]*geojson.Featu
 	}
 	return map[m.TileID][]*geojson.Feature{}
 }
+
+// clips multi-geometries
+func Clip_Multi_Naive(feature *geojson.Feature,size int) map[m.TileID][]*geojson.Feature {
+	var properties map[string]interface{}
+	var tempfeature *geojson.Feature
+	totalmap := map[m.TileID][]*geojson.Feature{}
+	if feature.Geometry.Type == "MultiPoint" {
+		for _,pt := range feature.Geometry.MultiPoint {
+			temptilemap := Clip_Naive(&geojson.Feature{
+				Geometry:geojson.NewPointGeometry(pt),
+				Properties:properties,
+			},size)
+
+			for k,v := range temptilemap {
+				temp,boolval := totalmap[k]
+				if boolval {
+					tempfeature = temp[0]
+				} else {
+					tempfeature = &geojson.Feature{Geometry:geojson.NewMultiPointGeometry(v[0].Geometry.Point),Properties:feature.Properties}
+				}
+				for _,newpt := range v[1:] {
+					tempfeature.Geometry.MultiPoint = append(tempfeature.Geometry.MultiPoint,newpt.Geometry.Point)
+				}
+				totalmap[k] = []*geojson.Feature{tempfeature}
+			}
+		}
+	} else if feature.Geometry.Type == "MultiLineString" {
+		for _,line := range feature.Geometry.MultiLineString {
+			temptilemap := Clip_Naive(&geojson.Feature{
+				Geometry:geojson.NewLineStringGeometry(line),
+				Properties:properties,
+			},size)
+
+			for k,v := range temptilemap {
+				temp,boolval := totalmap[k]
+				if boolval {
+					tempfeature = temp[0]
+				} else {
+					tempfeature = &geojson.Feature{Geometry:geojson.NewMultiLineStringGeometry(v[0].Geometry.LineString),Properties:feature.Properties}
+
+				}
+				for _,newline := range v[1:] {
+					tempfeature.Geometry.MultiLineString = append(tempfeature.Geometry.MultiLineString,newline.Geometry.LineString)
+				}
+				totalmap[k] = []*geojson.Feature{tempfeature}
+			}
+		}
+	} else if feature.Geometry.Type == "MultiPolygon" {
+		for _,polygon := range feature.Geometry.MultiPolygon {
+			temptilemap := Clip_Naive(&geojson.Feature{
+				Geometry:geojson.NewPolygonGeometry(polygon),
+				Properties:properties,
+			},size)
+
+			for k,v := range temptilemap {
+				temp,boolval := totalmap[k]
+				if boolval {
+					tempfeature = temp[0]
+				} else {
+					tempfeature = &geojson.Feature{Geometry:geojson.NewMultiPolygonGeometry(v[0].Geometry.Polygon),Properties:feature.Properties}
+				}
+				for _,newpolygon := range v[1:] {
+					tempfeature.Geometry.MultiPolygon = append(tempfeature.Geometry.MultiPolygon,newpolygon.Geometry.Polygon)
+				}
+				totalmap[k] = []*geojson.Feature{tempfeature}
+			}
+		}
+	}
+	return totalmap
+}
+
+
  
 // given a feature return tilemap of the clipped feature
 // works for simple geometries
@@ -181,7 +255,9 @@ func Clip_Naive(feature *geojson.Feature,size int) map[m.TileID][]*geojson.Featu
 // which is really only useful in the polygon clipping algorithm.
 func Clip_Tile(feature *geojson.Feature,tileid m.TileID) map[m.TileID][]*geojson.Feature {
 	// clipping for a single point
-	if feature.Geometry.Type == "Point" {
+	if strings.Contains(string(feature.Geometry.Type),"Multi") {
+		return Clip_Multi_Tile(feature,tileid)
+	} else if feature.Geometry.Type == "Point" {
 		tileid := m.Tile(feature.Geometry.Point[0],feature.Geometry.Point[1],int(tileid.Z)+1)
 		return map[m.TileID][]*geojson.Feature{tileid:[]*geojson.Feature{feature}}
 	} else if feature.Geometry.Type == "LineString" {
@@ -190,4 +266,81 @@ func Clip_Tile(feature *geojson.Feature,tileid m.TileID) map[m.TileID][]*geojson
 		return Feature_Clip_Tile(feature,tileid)
 	}
 	return map[m.TileID][]*geojson.Feature{}
+}
+
+
+// clips multi-geometries
+func Clip_Multi_Tile(feature *geojson.Feature,tile m.TileID) map[m.TileID][]*geojson.Feature {
+	var properties map[string]interface{}
+	var tempfeature *geojson.Feature
+	totalmap := map[m.TileID][]*geojson.Feature{}
+	if feature.Geometry.Type == "MultiPoint" {
+		for _,pt := range feature.Geometry.MultiPoint {
+			temptilemap := Clip_Tile(&geojson.Feature{
+				Geometry:geojson.NewPointGeometry(pt),
+				Properties:properties,
+			},tile)
+
+			for k,v := range temptilemap {
+				temp,boolval := totalmap[k]
+				if len(v) > 0 {
+					if boolval {
+						tempfeature = temp[0]
+					} else {
+						tempfeature = &geojson.Feature{Geometry:geojson.NewMultiPointGeometry(v[0].Geometry.Point),Properties:feature.Properties}
+					}
+					for _,newpt := range v[1:] {
+						tempfeature.Geometry.MultiPoint = append(tempfeature.Geometry.MultiPoint,newpt.Geometry.Point)
+					}
+					totalmap[k] = []*geojson.Feature{tempfeature}
+				}
+			}
+		}
+	} else if feature.Geometry.Type == "MultiLineString" {
+		for _,line := range feature.Geometry.MultiLineString {
+			temptilemap := Clip_Tile(&geojson.Feature{
+				Geometry:geojson.NewLineStringGeometry(line),
+				Properties:properties,
+			},tile)
+
+			for k,v := range temptilemap {
+				temp,boolval := totalmap[k]
+				if len(v) > 0 {
+					if boolval {
+						tempfeature = temp[0]
+					} else {
+						tempfeature = &geojson.Feature{Geometry:geojson.NewMultiLineStringGeometry(v[0].Geometry.LineString),Properties:feature.Properties}
+
+					}
+					for _,newline := range v[1:] {
+						tempfeature.Geometry.MultiLineString = append(tempfeature.Geometry.MultiLineString,newline.Geometry.LineString)
+					}
+					totalmap[k] = []*geojson.Feature{tempfeature}
+				}
+			}
+		}
+	} else if feature.Geometry.Type == "MultiPolygon" {
+		for _,polygon := range feature.Geometry.MultiPolygon {
+			temptilemap := Clip_Tile(&geojson.Feature{
+				Geometry:geojson.NewPolygonGeometry(polygon),
+				Properties:properties,
+			},tile)
+
+			for k,v := range temptilemap {
+				temp,boolval := totalmap[k]
+				if len(v) > 0 {
+					if boolval {
+						tempfeature = temp[0]
+					} else {
+						tempfeature = &geojson.Feature{Geometry:geojson.NewMultiPolygonGeometry(v[0].Geometry.Polygon),Properties:feature.Properties}
+					}
+					for _,newpolygon := range v[1:] {
+						tempfeature.Geometry.MultiPolygon = append(tempfeature.Geometry.MultiPolygon,newpolygon.Geometry.Polygon)
+					}
+					totalmap[k] = []*geojson.Feature{tempfeature}
+				}
+			}
+		}
+	}
+	return totalmap
 }
