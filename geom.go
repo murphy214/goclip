@@ -222,3 +222,8 @@ func (p Polygon) Construct(operation Op, clipping Polygon) Polygon {
 	}
 	return c.compute(operation)
 }
+
+
+
+
+
